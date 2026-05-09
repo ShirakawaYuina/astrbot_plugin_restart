@@ -13,6 +13,12 @@ from astrbot.api import logger
 from astrbot.core.star.context import Context
 from astrbot.core.star.star import StarMetadata
 
+from .ssh_restart import (
+    SshRestartConfig,
+    execute_ssh_command,
+    execute_ssh_docker_restart,
+    load_ssh_restart_config,
+)
 from .utils import format_docker_stats_output, get_restart_container_commands
 
 
@@ -26,8 +32,9 @@ class DashboardClient:
     # token 有效期阈值（秒）
     TOKEN_VALID_THRESHOLD = 23 * 3600
 
-    def __init__(self, context: Context):
+    def __init__(self, context: Context, plugin_config: Any | None = None):
         self.context = context
+        self.plugin_config = plugin_config
         self.stars: list[StarMetadata] = context.get_all_stars()
         self.star_manager = self.context._star_manager
 
@@ -56,8 +63,36 @@ class DashboardClient:
 
     # -------------------- 公共接口 --------------------
     async def restart(self) -> None:
-        """同时重启 napcat 与 astrbot 容器。"""
+        """
+        根据配置选择重启方式。
+
+        业务意图：
+        - ssh：在宿主机执行 docker restart，适合 AstrBot 运行在无 Docker CLI 的容器内；
+        - docker_cli：保留容器内直接执行 docker 的旧行为；
+        - dashboard：只重启 AstrBot 核心，作为不具备宿主机 Docker 权限时的兜底。
+        """
+        restart_method = "ssh"
+        if self.plugin_config is not None:
+            restart_method = self.plugin_config.get("restart_method", "ssh")
+
+        if restart_method == "ssh":
+            await self.restart_docker_containers_via_ssh()
+            return
+        if restart_method == "dashboard":
+            await self.restart_astrbot_core()
+            return
         await self.restart_docker_containers()
+
+    async def restart_astrbot_core(self) -> None:
+        """通过 AstrBot Dashboard 接口重启核心进程，不触碰宿主机 Docker。"""
+        await self._request("POST", self.restart_url)
+
+    async def restart_docker_containers_via_ssh(self) -> None:
+        """通过 SSH 登录宿主机，并在宿主机上重启 Docker 容器。"""
+        if self.plugin_config is None:
+            raise RuntimeError("SSH 重启缺少插件配置")
+        ssh_config = load_ssh_restart_config(self.plugin_config)
+        await execute_ssh_docker_restart(ssh_config)
 
     async def restart_docker_containers(self) -> None:
         """
@@ -73,6 +108,12 @@ class DashboardClient:
 
     async def get_docker_stats(self) -> str:
         """获取 Docker 容器瞬时资源占用，用于重启完成后的回执消息。"""
+        if self._should_use_ssh():
+            ssh_config = load_ssh_restart_config(self.plugin_config)
+            output = await self._run_ssh_command(
+                ssh_config, ["docker", "stats", "--no-stream"]
+            )
+            return format_docker_stats_output(output)
         output = await self._run_docker_command(["docker", "stats", "--no-stream"])
         return format_docker_stats_output(output)
 
@@ -86,7 +127,10 @@ class DashboardClient:
         - 合并 stderr，便于把 Docker 失败原因回传给调用方。
         """
         if shutil.which(command[0]) is None:
-            raise RuntimeError("未找到 docker 命令，请确认 Docker 已安装并在 PATH 中")
+            raise RuntimeError(
+                "未找到 docker 命令，请确认 Docker 已安装并在 PATH 中；"
+                "若 AstrBot 运行在 Docker 容器内，建议将 restart_method 设置为 ssh"
+            )
 
         def run_command() -> str:
             result = subprocess.run(
@@ -103,6 +147,20 @@ class DashboardClient:
             return result.stdout
 
         return await asyncio.to_thread(run_command)
+
+    async def _run_ssh_command(
+        self, ssh_config: SshRestartConfig, command: list[str]
+    ) -> str:
+        """通过 SSH 运行远程命令，供重启和资源统计复用。"""
+        if self.plugin_config is None:
+            raise RuntimeError("SSH 命令执行缺少插件配置")
+        return await execute_ssh_command(ssh_config, command)
+
+    def _should_use_ssh(self) -> bool:
+        """判断当前插件是否应该优先使用 SSH 重启路径。"""
+        if self.plugin_config is None:
+            return False
+        return self.plugin_config.get("restart_method", "ssh") == "ssh"
 
     async def _request(
         self,

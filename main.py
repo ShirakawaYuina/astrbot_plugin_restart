@@ -32,7 +32,7 @@ class RestartPlugin(Star):
     # ================== 生命周期 ==================
 
     async def initialize(self):
-        self.dashboard = DashboardClient(self.context)
+        self.dashboard = DashboardClient(self.context, self.config)
         await self.dashboard.initialize()
         self.scheduler = RestartScheduler(self.context, self.config, self.dashboard)
         if self.config["restart_switch"]:
