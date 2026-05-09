@@ -17,7 +17,12 @@ from astrbot.core.star.star_manager import PluginManager
 
 from .dashboard_client import DashboardClient
 from .restart_scheduler import RestartScheduler
-from .utils import cron_to_human, get_memory_info, get_system_resource_info
+from .utils import (
+    build_resource_usage_message,
+    cron_to_human,
+    get_memory_info,
+    get_system_resource_info,
+)
 
 
 class RestartPlugin(Star):
@@ -208,6 +213,13 @@ class RestartPlugin(Star):
     @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("资源占用")
     async def show_resource_usage(self, event: AstrMessageEvent):
-        """显示当前系统 CPU、内存、磁盘占用。"""
+        """显示当前系统资源与宿主机 Docker 容器资源占用。"""
         resource_info = get_system_resource_info()
-        await event.send(event.plain_result(f"系统资源占用：\n{resource_info}"))
+        try:
+            docker_stats = await self.dashboard.get_docker_stats()
+            message = build_resource_usage_message(resource_info, docker_stats)
+        except Exception as exc:
+            # Docker 资源依赖 SSH、Docker 权限和宿主机状态，失败时保留系统资源信息。
+            logger.warning(f"获取 Docker 容器资源占用失败：{exc}")
+            message = build_resource_usage_message(resource_info, docker_error=str(exc))
+        await event.send(event.plain_result(message))

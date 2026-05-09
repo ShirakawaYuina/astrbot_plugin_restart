@@ -21,12 +21,6 @@ def test_format_docker_stats_output_when_empty():
     assert utils.format_docker_stats_output(" \n\t") == "未获取到 Docker 资源数据"
 
 
-def test_get_restart_container_commands():
-    assert utils.get_restart_container_commands() == [
-        ["docker", "restart", "napcat", "astrbot"],
-    ]
-
-
 def test_get_system_resource_info(monkeypatch):
     monkeypatch.setattr(utils.psutil, "cpu_percent", lambda interval: 12.3)
     monkeypatch.setattr(

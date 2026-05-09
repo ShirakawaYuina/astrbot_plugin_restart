@@ -114,17 +114,23 @@ def format_docker_stats_output(raw_output: str) -> str:
     return "\n".join(lines)
 
 
-def get_restart_container_commands() -> list[list[str]]:
+def build_resource_usage_message(
+    system_info: str,
+    docker_stats: str | None = None,
+    docker_error: str | None = None,
+) -> str:
     """
-    返回容器重启命令列表。
+    组合“资源占用”命令的完整回显。
 
     业务意图：
-    - 使用一条命令同时声明 napcat 与 astrbot，避免两次调用带来的时序差异；
-    - 保持返回“命令列表”结构，便于后续扩展其它重启步骤。
+    - 系统资源始终优先展示，避免 Docker/SSH 异常掩盖本机状态；
+    - Docker 容器资源单独成段，直接展示 docker stats --no-stream 的表格输出；
+    - Docker 获取失败时保留失败原因，方便定位 SSH、权限或 Docker 守护进程问题。
     """
-    return [
-        ["docker", "restart", "napcat", "astrbot"],
-    ]
+    message = f"系统资源占用：\n{system_info}"
+    if docker_error:
+        return f"{message}\n\nDocker 容器资源占用：获取失败（{docker_error}）"
+    return f"{message}\n\nDocker 容器资源占用：\n{docker_stats or '未获取到 Docker 资源数据'}"
 
 
 def _format_gib(used_bytes: int, total_bytes: int, decimal_places: int = 1) -> str:

@@ -35,7 +35,7 @@ git clone https://github.com/Zhalslar/astrbot_plugin_restart
 
 ### 重启方式
 
-默认使用 `ssh` 方式：插件会通过 SSH 登录宿主机，并执行：
+插件固定使用 SSH 方式：通过 SSH 登录宿主机，并执行：
 
 ```bash
 docker restart astrbot napcat
@@ -47,19 +47,15 @@ docker restart astrbot napcat
 sudo docker restart astrbot napcat
 ```
 
-`restart_method` 可选值：
-
-- `ssh`：通过 SSH 在宿主机执行 Docker 重启，适合 AstrBot 运行在 Docker 容器内的场景。
-- `docker_cli`：在当前运行环境直接执行 Docker 命令，需要容器内存在 `docker` 命令并具备 Docker 权限。
-- `dashboard`：只调用 AstrBot 面板接口重启 AstrBot 核心，不会重启 napcat 容器。
+该方式适合 AstrBot 运行在 Docker 容器内的场景，避免容器内缺少 Docker CLI 或 Docker socket 导致重启失败。
 
 ### 命令表
 
 |     命令      |                    说明                    |
 |:-------------:|:-----------------------------------------------:|
-| 重启   | 按配置的重启方式重启 AstrBot/napcat  |
+| 重启   | 通过 SSH 在宿主机重启 AstrBot/napcat 容器  |
 | 定时重启 开/关   | 开启或关闭按 Cron 表达式定时重启  |
-| 资源占用   | 查看当前系统 CPU、内存、磁盘占用  |
+| 资源占用   | 查看当前系统 CPU、内存、磁盘占用，并通过 SSH 获取 Docker 容器资源占用  |
 | 重载 <插件名\|序号\|all>   | 重载指定插件或全部插件  |
 
 ### 示例图

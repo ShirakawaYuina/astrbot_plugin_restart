@@ -1,11 +1,4 @@
 {
-    "restart_method": {
-        "description": "重启方式",
-        "type": "string",
-        "options": ["ssh", "docker_cli", "dashboard"],
-        "default": "ssh",
-        "hint": "ssh：通过 SSH 登录宿主机执行 docker restart，适合容器内运行；docker_cli：在当前环境直接执行 docker；dashboard：仅重启 AstrBot 核心进程。"
-    },
     "ssh_host": {
         "description": "SSH 主机地址",
         "type": "string",
