@@ -5,14 +5,14 @@ import utils
 
 def test_format_docker_stats_output_with_content():
     raw_output = """
-CONTAINER ID   NAME      CPU %     MEM USAGE / LIMIT   MEM %
-abc123         napcat    1.23%     10MiB / 1GiB        0.98%
-def456         astrbot   3.21%     120MiB / 2GiB       5.86%
+CONTAINER ID   NAME              CPU %     MEM USAGE / LIMIT   MEM %     NET I/O         BLOCK I/O
+abc123         napcat            1.23%     10MiB / 1GiB        0.98%     1.2kB / 3.4kB   0B / 0B
+def456         astrbot-longname   3.21%     120MiB / 2GiB       5.86%     2.2kB / 4.4kB   0B / 0B
 """
     expected = (
-        "CONTAINER ID   NAME      CPU %     MEM USAGE / LIMIT   MEM %\n"
-        "abc123         napcat    1.23%     10MiB / 1GiB        0.98%\n"
-        "def456         astrbot   3.21%     120MiB / 2GiB       5.86%"
+        "NAME              CPU %  MEM USAGE / LIMIT  MEM %\n"
+        "napcat            1.23%  10MiB / 1GiB       0.98%\n"
+        "astrbot-longname  3.21%  120MiB / 2GiB      5.86%"
     )
     assert utils.format_docker_stats_output(raw_output) == expected
 

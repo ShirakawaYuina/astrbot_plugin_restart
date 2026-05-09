@@ -104,14 +104,61 @@ def format_docker_stats_output(raw_output: str) -> str:
     规范化 docker stats 命令输出，便于直接在聊天消息中展示。
 
     业务意图：
-    - 保留原始表格列信息，避免因二次解析丢字段；
+    - 只保留最有价值的容器资源列，减少聊天输出噪音；
+    - 对每一列进行左对齐，保证聊天端的等宽展示可读；
     - 去除首尾空白行，减少消息噪音；
     - 在 docker 无返回内容时提供明确兜底文案。
     """
     lines = [line.rstrip() for line in raw_output.splitlines() if line.strip()]
     if not lines:
         return "未获取到 Docker 资源数据"
-    return "\n".join(lines)
+
+    headers = ["NAME", "CPU %", "MEM USAGE / LIMIT", "MEM %"]
+
+    def split_columns(line: str) -> list[str]:
+        return [part for part in line.split("  ") if part.strip()]
+
+    parsed_rows: list[dict[str, str]] = []
+    header_index_map: dict[str, int] | None = None
+
+    for raw_line in lines:
+        columns = split_columns(raw_line)
+        if not columns:
+            continue
+        if header_index_map is None:
+            normalized_headers = [column.strip() for column in columns]
+            header_index_map = {
+                header: idx
+                for idx, header in enumerate(normalized_headers)
+                if header in headers
+            }
+            continue
+
+        row = {}
+        for header in headers:
+            idx = header_index_map.get(header)
+            row[header] = (
+                columns[idx].strip() if idx is not None and idx < len(columns) else ""
+            )
+        if any(row.values()):
+            parsed_rows.append(row)
+
+    if header_index_map is None or not parsed_rows:
+        return "未获取到 Docker 资源数据"
+
+    widths = {
+        header: max(len(header), *(len(row[header]) for row in parsed_rows))
+        for header in headers
+    }
+
+    def format_row(row: dict[str, str]) -> str:
+        return "  ".join(row[header].ljust(widths[header]) for header in headers)
+
+    output_lines = [
+        "  ".join(header.ljust(widths[header]) for header in headers),
+    ]
+    output_lines.extend(format_row(row) for row in parsed_rows)
+    return "\n".join(output_lines)
 
 
 def build_resource_usage_message(
