@@ -1,6 +1,9 @@
 # dashboard_client.py
 
+import asyncio
 import os
+import shutil
+import subprocess
 import time
 from typing import Any
 
@@ -9,6 +12,8 @@ import aiohttp
 from astrbot.api import logger
 from astrbot.core.star.context import Context
 from astrbot.core.star.star import StarMetadata
+
+from .utils import format_docker_stats_output, get_restart_container_commands
 
 
 class DashboardClient:
@@ -51,16 +56,60 @@ class DashboardClient:
 
     # -------------------- 公共接口 --------------------
     async def restart(self) -> None:
-        """重启 AstrBot 核心"""
-        await self._request("POST", self.restart_url)
+        """同时重启 napcat 与 astrbot 容器。"""
+        await self.restart_docker_containers()
+
+    async def restart_docker_containers(self) -> None:
+        """
+        同时重启 napcat 与 astrbot 容器。
+
+        业务意图：
+        - 用户明确要求使用 docker restart napcat astrbot；
+        - 不再调用面板 restart-core 接口，避免 AstrBot 额外再重启一次；
+        - Docker 命令失败时抛出异常，让命令入口可以明确提示失败原因。
+        """
+        commands = get_restart_container_commands()
+        await self._run_docker_command(commands[0])
+
+    async def get_docker_stats(self) -> str:
+        """获取 Docker 容器瞬时资源占用，用于重启完成后的回执消息。"""
+        output = await self._run_docker_command(["docker", "stats", "--no-stream"])
+        return format_docker_stats_output(output)
 
     # -------------------- 内部工具 --------------------
+    async def _run_docker_command(self, command: list[str]) -> str:
+        """
+        在线程池中执行 Docker 命令，避免阻塞 AstrBot 的异步事件循环。
+
+        边界条件说明：
+        - docker 不在 PATH 时给出明确错误；
+        - 合并 stderr，便于把 Docker 失败原因回传给调用方。
+        """
+        if shutil.which(command[0]) is None:
+            raise RuntimeError("未找到 docker 命令，请确认 Docker 已安装并在 PATH 中")
+
+        def run_command() -> str:
+            result = subprocess.run(
+                command,
+                capture_output=True,
+                check=False,
+                encoding="utf-8",
+                errors="replace",
+                text=True,
+            )
+            if result.returncode != 0:
+                message = (result.stderr or result.stdout).strip()
+                raise RuntimeError(f"Docker 命令执行失败：{message or command}")
+            return result.stdout
+
+        return await asyncio.to_thread(run_command)
+
     async def _request(
         self,
         method: str,
         url: str,
         *,
-        json: dict[str, Any] | None= None,
+        json: dict[str, Any] | None = None,
         **kwargs,
     ) -> dict[str, Any]:
         """统一网络请求：自动带鉴权、自动续期、自动抛异常"""

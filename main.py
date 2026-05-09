@@ -17,7 +17,7 @@ from astrbot.core.star.star_manager import PluginManager
 
 from .dashboard_client import DashboardClient
 from .restart_scheduler import RestartScheduler
-from .utils import cron_to_human, get_memory_info
+from .utils import cron_to_human, get_memory_info, get_system_resource_info
 
 
 class RestartPlugin(Star):
@@ -80,6 +80,14 @@ class RestartPlugin(Star):
             memory_info = get_memory_info()
             msg += f"\n内存：{memory_info}"
 
+        # 重启后补充 Docker 资源快照，方便快速确认容器状态是否稳定。
+        try:
+            docker_stats = await self.dashboard.get_docker_stats()
+            msg += f"\nDocker 资源占用：\n{docker_stats}"
+        except Exception as exc:
+            logger.warning(f"获取 Docker 资源占用失败：{exc}")
+            msg += f"\nDocker 资源占用：获取失败（{exc}）"
+
         await self.context.send_message(
             session=restart_umo,
             message_chain=MessageChain([Plain(msg)]),
@@ -100,8 +108,16 @@ class RestartPlugin(Star):
         self.cache["umo"] = event.unified_msg_origin
         self.cache["start_ts"] = time.time()
         self.config.save_config()
-
-        await self.dashboard.restart()
+        try:
+            await self.dashboard.restart()
+        except Exception as exc:
+            # Docker 重启命令未成功时，清理缓存，避免后续 on_platform_loaded 误判为成功重启。
+            self.cache["platform_id"] = ""
+            self.cache["umo"] = ""
+            self.cache["start_ts"] = 0
+            self.config.save_config()
+            logger.error(f"执行容器重启失败：{exc}")
+            await event.send(event.plain_result(f"重启失败：{exc}"))
 
     @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("定时重启")
@@ -126,7 +142,9 @@ class RestartPlugin(Star):
 
     @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("重载")
-    async def reload_plugin(self, event: AstrMessageEvent, target: str | int | None = None):
+    async def reload_plugin(
+        self, event: AstrMessageEvent, target: str | int | None = None
+    ):
         """重载 <插件名|序号|空|all>"""
         from astrbot.core.star.star import star_registry as sr
 
@@ -175,10 +193,21 @@ class RestartPlugin(Star):
         if plugin_key is None:
             show_name = "所有插件"
         else:
-            if meta := next((m for m in sr if (m.name or m.module_path) == plugin_key), None):
-                show_name = str(meta.display_name or meta.name).removeprefix("astrbot_plugin_")
+            if meta := next(
+                (m for m in sr if (m.name or m.module_path) == plugin_key), None
+            ):
+                show_name = str(meta.display_name or meta.name).removeprefix(
+                    "astrbot_plugin_"
+                )
 
         if success:
             yield event.plain_result(f"{show_name}重载成功")
         else:
             yield event.plain_result(f"{show_name}重载失败：{error_message}")
+
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    @filter.command("资源占用")
+    async def show_resource_usage(self, event: AstrMessageEvent):
+        """显示当前系统 CPU、内存、磁盘占用。"""
+        resource_info = get_system_resource_info()
+        await event.send(event.plain_result(f"系统资源占用：\n{resource_info}"))

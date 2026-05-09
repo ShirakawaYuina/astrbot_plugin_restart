@@ -1,4 +1,6 @@
-# utils.py
+from pathlib import Path
+
+import psutil
 
 
 def cron_to_human(cron: str) -> str:
@@ -68,7 +70,6 @@ def cron_to_human(cron: str) -> str:
     return " ".join(desc)
 
 
-
 def get_memory_info(decimal_places=1):
     """
     获取当前设备内存情况，支持自定义小数位数
@@ -79,7 +80,6 @@ def get_memory_info(decimal_places=1):
     Returns:
         str: 已用内存/总内存(百分比) 格式，如 "8.5GB/16.0GB(53.2%)"
     """
-    import psutil
     # 获取内存信息
     memory = psutil.virtual_memory()
 
@@ -97,3 +97,62 @@ def get_memory_info(decimal_places=1):
     # 格式化输出，使用指定的小数位数
     format_str = f"{{:.{decimal_places}f}}GB/{{:.{decimal_places}f}}GB({{:.1f}}%)"
     return format_str.format(used_gb, total_gb, usage_percent)
+
+
+def format_docker_stats_output(raw_output: str) -> str:
+    """
+    规范化 docker stats 命令输出，便于直接在聊天消息中展示。
+
+    业务意图：
+    - 保留原始表格列信息，避免因二次解析丢字段；
+    - 去除首尾空白行，减少消息噪音；
+    - 在 docker 无返回内容时提供明确兜底文案。
+    """
+    lines = [line.rstrip() for line in raw_output.splitlines() if line.strip()]
+    if not lines:
+        return "未获取到 Docker 资源数据"
+    return "\n".join(lines)
+
+
+def get_restart_container_commands() -> list[list[str]]:
+    """
+    返回容器重启命令列表。
+
+    业务意图：
+    - 使用一条命令同时声明 napcat 与 astrbot，避免两次调用带来的时序差异；
+    - 保持返回“命令列表”结构，便于后续扩展其它重启步骤。
+    """
+    return [
+        ["docker", "restart", "napcat", "astrbot"],
+    ]
+
+
+def _format_gib(used_bytes: int, total_bytes: int, decimal_places: int = 1) -> str:
+    """统一的字节转 GB 格式化，保证各资源字段显示一致。"""
+    used_gb = used_bytes / (1024**3)
+    total_gb = total_bytes / (1024**3)
+    usage_percent = (used_bytes / total_bytes) * 100 if total_bytes else 0
+    format_str = f"{{:.{decimal_places}f}}GB/{{:.{decimal_places}f}}GB({{:.1f}}%)"
+    return format_str.format(used_gb, total_gb, usage_percent)
+
+
+def get_system_resource_info(decimal_places: int = 1) -> str:
+    """
+    获取系统 CPU、内存、磁盘占用，供“资源占用”命令直接回显。
+
+    边界条件说明：
+    - 磁盘统计使用当前工作目录所在盘符，兼容 Windows 与 Linux；
+    - CPU 采样使用短间隔，避免瞬时值为 0 的可读性问题。
+    """
+    cpu_usage = psutil.cpu_percent(interval=0.2)
+
+    memory = psutil.virtual_memory()
+    memory_used = memory.total - memory.available
+    memory_text = _format_gib(memory_used, memory.total, decimal_places)
+
+    current_path = Path.cwd()
+    disk_root = current_path.anchor or str(current_path)
+    disk = psutil.disk_usage(disk_root)
+    disk_text = _format_gib(disk.used, disk.total, decimal_places)
+
+    return f"CPU：{cpu_usage:.1f}%\n内存：{memory_text}\n磁盘：{disk_text}"
